@@ -34,11 +34,16 @@ const TELEGRAM_BOT_TOKEN = "8726268540:AAEHrjR0V5I3_sdqyTJhL9CkAe47KJPWYww";
 const TELEGRAM_CHAT_ID = "6556513818";
 
 // Initialize WhatsApp Client
+const puppeteerOptions = {
+    args:['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+};
+if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+    puppeteerOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+}
+
 const client = new Client({
     authStrategy: new LocalAuth(),
-    puppeteer: {
-        args:['--no-sandbox', '--disable-setuid-sandbox']
-    }
+    puppeteer: puppeteerOptions
 });
 
 client.on('qr', (qr) => {
