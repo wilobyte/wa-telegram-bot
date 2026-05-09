@@ -2,26 +2,24 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = requi
 const qrcode = require('qrcode-terminal');
 const axios = require('axios');
 const express = require('express');
-const pino = require('pino');
 
-// Dummy Server for Render
+// Dummy Server
 const app = express();
 app.get('/', (req, res) => res.send('Bot Active'));
-app.listen(process.env.PORT || 3000, () => console.log('Web server is up'));
+app.listen(process.env.PORT || 3000, () => console.log('1. Web server is up'));
 
-// Config
 const TELEGRAM_TOKEN = "8726268540:AAEHrjR0V5I3_sdqyTJhL9CkAe47KJPWYww";
-const TELEGRAM_CHAT_ID = "6556513818"; // REMEMBER TO CHANGE THIS TO YOUR ID!!
-
-const DM_PATTERNS = [/bernice/i, /arch azeez/i, /dad/i, /mom/i, /jeremy/i, /dennis/i, /jasmine/i];
+const TELEGRAM_CHAT_ID = "6556513818"; 
 
 async function startBot() {
+    console.log('2. Starting WhatsApp connection logic...');
+    
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     
     const sock = makeWASocket({
         auth: state,
-        // Removed the deprecated printQRInTerminal option
-        logger: pino({ level: 'silent' })
+        printQRInTerminal: false, // We handle this manually below
+        browser: ['Linux', 'Chrome', '1.0.0']
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -30,16 +28,22 @@ async function startBot() {
         const { connection, lastDisconnect, qr } = update;
         
         if (qr) {
-            console.log("\n--- [SCAN THE QR CODE BELOW] ---");
+            console.log("3. QR CODE GENERATED! SCAN NOW:");
             qrcode.generate(qr, { small: true });
-            console.log("--- [END OF QR CODE] ---\n");
         }
         
+        if (connection === 'connecting') {
+            console.log('4. Connecting to WhatsApp...');
+        }
+        
+        if (connection === 'open') {
+            console.log('5. SUCCESS: WhatsApp is connected!');
+        }
+
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
+            console.log('Connection closed. Reconnecting:', shouldReconnect);
             if (shouldReconnect) startBot();
-        } else if (connection === 'open') {
-            console.log('SUCCESS: WhatsApp is connected!');
         }
     });
 
@@ -49,18 +53,13 @@ async function startBot() {
         if (!msg.message || msg.key.fromMe) return;
 
         const from = msg.key.remoteJid;
-        const body = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-        const senderName = msg.pushName || "Unknown";
+        const body = msg.message.conversation || msg.message.extendedTextMessage?.text || "Media/Attachment (No text)";
+        const senderName = msg.pushName || "Unknown Contact";
 
-        const isMatch = (name, patterns) => patterns.some(p => p.test(name));
+        console.log(`New message from ${senderName}: ${body}`);
 
-        if (from.endsWith('@g.us')) { 
-            // Matches any group message (since groups change names often)
-            // You can add logic here to only forward specific groups if needed
-            forwardToTelegram(`*Group Msg:* ${from}\n*From:* ${senderName}\n\n${body}`);
-        } else if (isMatch(senderName, DM_PATTERNS)) {
-            forwardToTelegram(`*Private Msg:* ${senderName}\n\n${body}`);
-        }
+        // Forward all messages to Telegram (Simplest logic for now)
+        forwardToTelegram(`*Msg from:* ${senderName}\n*ID:* ${from}\n\n${body}`);
     });
 }
 
@@ -69,7 +68,7 @@ function forwardToTelegram(text) {
         chat_id: TELEGRAM_CHAT_ID,
         text: text,
         parse_mode: "Markdown"
-    }).catch(err => console.log("Telegram Error: " + err.message));
+    }).catch(err => console.log("TG Error"));
 }
 
-startBot().catch(err => console.log("Startup Error: " + err.message));
+startBot().catch(err => console.log("Startup Error: " + err));
