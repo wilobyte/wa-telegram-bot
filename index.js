@@ -11,8 +11,8 @@ app.listen(process.env.PORT || 3000, () => console.log('1. Express server is onl
 const GROUP_PATTERNS = [/STE/i, /INFO/i, /UNIBEN/i, /ASCES/i]; 
 const DM_PATTERNS = [/bernice/i, /arch azeez/i, /dad/i, /mom/i, /jeremy/i, /dennis/i, /jasmine/i]; 
 
-const TELEGRAM_BOT_TOKEN = "8726268540:AAEHrjR0V5I3_sdqyTJhL9CkAe47KJPWYww"";
-const TELEGRAM_CHAT_ID = "6556513818"";
+const TELEGRAM_BOT_TOKEN = "8726268540:AAEHrjR0V5I3_sdqyTJhL9CkAe47KJPWYww";
+const TELEGRAM_CHAT_ID = "6556513818";
 
 console.log('2. Setting up Puppeteer...');
 
