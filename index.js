@@ -1,61 +1,80 @@
-const express = require('express');
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const axios = require('axios');
+const express = require('express');
+const pino = require('pino');
 
+// Dummy Server for Render
 const app = express();
-app.get('/', (req, res) => res.send('Bot is running!'));
-app.listen(process.env.PORT || 3000, () => console.log('1. Express server is online.'));
+app.get('/', (req, res) => res.send('Bot Active'));
+app.listen(process.env.PORT || 3000);
 
-// Patterns
-const GROUP_PATTERNS = [/STE/i, /INFO/i, /UNIBEN/i, /ASCES/i]; 
-const DM_PATTERNS = [/bernice/i, /arch azeez/i, /dad/i, /mom/i, /jeremy/i, /dennis/i, /jasmine/i]; 
+// Config
+const TELEGRAM_TOKEN = "8726268540:AAEHrjR0V5I3_sdqyTJhL9CkAe47KJPWYww";
+const TELEGRAM_CHAT_ID = "6556513818"; // Double check this!
 
-const TELEGRAM_BOT_TOKEN = "8726268540:AAEHrjR0V5I3_sdqyTJhL9CkAe47KJPWYww";
-const TELEGRAM_CHAT_ID = "6556513818";
+const GROUP_PATTERNS = [/STE/i, /INFO/i, /UNIBEN/i, /ASCES/i];
+const DM_PATTERNS = [/bernice/i, /arch azeez/i, /dad/i, /mom/i, /jeremy/i, /dennis/i, /jasmine/i];
 
-console.log('2. Setting up Puppeteer...');
+async function startBot() {
+    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+    
+    const sock = makeWASocket({
+        auth: state,
+        printQRInTerminal: true,
+        logger: pino({ level: 'silent' })
+    });
 
-const client = new Client({
-    authStrategy: new LocalAuth(),
-    puppeteer: {
-        headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--single-process', // Helps with low memory on Render
-            '--disable-gpu'
-        ],
-    }
-});
+    sock.ev.on('creds.update', saveCreds);
 
-client.on('qr', (qr) => {
-    console.log('3. SUCCESS: QR Code Received! Generating display...');
-    qrcode.generate(qr, { small: true });
-});
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect, qr } = update;
+        if (qr) {
+            console.log("QR RECEIVED - SCAN NOW:");
+            qrcode.generate(qr, { small: true });
+        }
+        if (connection === 'close') {
+            const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
+            if (shouldReconnect) startBot();
+        } else if (connection === 'open') {
+            console.log('SUCCESS: WhatsApp is connected!');
+        }
+    });
 
-client.on('ready', () => {
-    console.log('4. Bot is fully authenticated and ready!');
-});
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+        if (type !== 'notify') return;
+        const msg = messages[0];
+        if (!msg.message || msg.key.fromMe) return;
 
-// Logic for messages (same as before)
-client.on('message', async (msg) => {
-    const chat = await msg.getChat();
-    const matches = (name, patterns) => name && patterns.some(p => p.test(name));
+        const from = msg.key.remoteJid;
+        const body = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+        
+        // Get name of sender or group
+        let chatName = "";
+        try {
+            const contact = await sock.onWhatsApp(from);
+            chatName = contact[0]?.notify || from;
+        } catch (e) { chatName = from; }
 
-    if (chat.isGroup && matches(chat.name, GROUP_PATTERNS)) {
-        const contact = await msg.getContact();
-        const text = `*Group:* ${chat.name}\n*From:* ${contact.name || contact.pushname}\n\n${msg.body}`;
-        axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, { chat_id: TELEGRAM_CHAT_ID, text, parse_mode: "Markdown" }).catch(e => console.error("TG Error", e.message));
-    } else if (!chat.isGroup && matches(chat.name, DM_PATTERNS)) {
-        const text = `*Private:* ${chat.name}\n\n${msg.body}`;
-        axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, { chat_id: TELEGRAM_CHAT_ID, text, parse_mode: "Markdown" }).catch(e => console.error("TG Error", e.message));
-    }
-});
+        const isMatch = (name, patterns) => patterns.some(p => p.test(name));
 
-console.log('5. Initializing WhatsApp (this may take 2-4 minutes)...');
-client.initialize().catch(err => console.error('CRITICAL ERROR:', err));
+        if (from.endsWith('@g.us')) { // It's a group
+             // For groups, Baileys needs extra metadata to get the group name
+             // To keep it simple and light, we'll just check the ID or skip group name check
+             // and just forward if it's from a group you care about.
+             forwardToTelegram(`*From Group:* ${from}\n\n${body}`);
+        } else if (isMatch(chatName, DM_PATTERNS)) {
+             forwardToTelegram(`*Private Message:* ${chatName}\n\n${body}`);
+        }
+    });
+}
+
+function forwardToTelegram(text) {
+    axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
+        chat_id: TELEGRAM_CHAT_ID,
+        text: text,
+        parse_mode: "Markdown"
+    }).catch(err => console.log("Telegram Error"));
+}
+
+startBot();
