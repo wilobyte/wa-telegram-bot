@@ -7,13 +7,12 @@ const pino = require('pino');
 // Dummy Server for Render
 const app = express();
 app.get('/', (req, res) => res.send('Bot Active'));
-app.listen(process.env.PORT || 3000);
+app.listen(process.env.PORT || 3000, () => console.log('Web server is up'));
 
 // Config
 const TELEGRAM_TOKEN = "8726268540:AAEHrjR0V5I3_sdqyTJhL9CkAe47KJPWYww";
-const TELEGRAM_CHAT_ID = "6556513818"; // Double check this!
+const TELEGRAM_CHAT_ID = "6556513818"; // REMEMBER TO CHANGE THIS TO YOUR ID!!
 
-const GROUP_PATTERNS = [/STE/i, /INFO/i, /UNIBEN/i, /ASCES/i];
 const DM_PATTERNS = [/bernice/i, /arch azeez/i, /dad/i, /mom/i, /jeremy/i, /dennis/i, /jasmine/i];
 
 async function startBot() {
@@ -21,7 +20,7 @@ async function startBot() {
     
     const sock = makeWASocket({
         auth: state,
-        printQRInTerminal: true,
+        // Removed the deprecated printQRInTerminal option
         logger: pino({ level: 'silent' })
     });
 
@@ -29,10 +28,13 @@ async function startBot() {
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
+        
         if (qr) {
-            console.log("QR RECEIVED - SCAN NOW:");
+            console.log("\n--- [SCAN THE QR CODE BELOW] ---");
             qrcode.generate(qr, { small: true });
+            console.log("--- [END OF QR CODE] ---\n");
         }
+        
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
             if (shouldReconnect) startBot();
@@ -48,23 +50,16 @@ async function startBot() {
 
         const from = msg.key.remoteJid;
         const body = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-        
-        // Get name of sender or group
-        let chatName = "";
-        try {
-            const contact = await sock.onWhatsApp(from);
-            chatName = contact[0]?.notify || from;
-        } catch (e) { chatName = from; }
+        const senderName = msg.pushName || "Unknown";
 
         const isMatch = (name, patterns) => patterns.some(p => p.test(name));
 
-        if (from.endsWith('@g.us')) { // It's a group
-             // For groups, Baileys needs extra metadata to get the group name
-             // To keep it simple and light, we'll just check the ID or skip group name check
-             // and just forward if it's from a group you care about.
-             forwardToTelegram(`*From Group:* ${from}\n\n${body}`);
-        } else if (isMatch(chatName, DM_PATTERNS)) {
-             forwardToTelegram(`*Private Message:* ${chatName}\n\n${body}`);
+        if (from.endsWith('@g.us')) { 
+            // Matches any group message (since groups change names often)
+            // You can add logic here to only forward specific groups if needed
+            forwardToTelegram(`*Group Msg:* ${from}\n*From:* ${senderName}\n\n${body}`);
+        } else if (isMatch(senderName, DM_PATTERNS)) {
+            forwardToTelegram(`*Private Msg:* ${senderName}\n\n${body}`);
         }
     });
 }
@@ -74,7 +69,7 @@ function forwardToTelegram(text) {
         chat_id: TELEGRAM_CHAT_ID,
         text: text,
         parse_mode: "Markdown"
-    }).catch(err => console.log("Telegram Error"));
+    }).catch(err => console.log("Telegram Error: " + err.message));
 }
 
-startBot();
+startBot().catch(err => console.log("Startup Error: " + err.message));
