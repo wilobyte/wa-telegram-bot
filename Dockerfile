@@ -12,4 +12,4 @@ RUN npm install
 COPY . .
 
 # Start the bot
-CMD["node", "index.js"]
+CMD ["node", "index.js"]
