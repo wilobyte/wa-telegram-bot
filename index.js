@@ -1,29 +1,26 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const axios = require('axios');
 const express = require('express');
 
 const app = express();
 app.get('/', (req, res) => res.send('Bot Active'));
-app.listen(process.env.PORT || 3000, () => console.log('Web server online'));
+app.listen(process.env.PORT || 3000);
 
 const TELEGRAM_TOKEN = "8726268540:AAEHrjR0V5I3_sdqyTJhL9CkAe47KJPWYww";
-const TELEGRAM_CHAT_ID = "6556513818"; // Double check this!
+const TELEGRAM_CHAT_ID = "6556513818"; 
 
 async function startBot() {
-    console.log('Initializing WhatsApp connection...');
-    
-    // Auth state saves your login in a folder
-    const { state, saveCreds } = await useMultiFileAuthState('auth_session');
+    // We use a different folder name to force a clean session attempt
+    const { state, saveCreds } = await useMultiFileAuthState('session_stable');
     
     const sock = makeWASocket({
         auth: state,
         printQRInTerminal: false,
-        // mimicking a modern browser identity
-        browser: ['Windows', 'Chrome', '120.0.0.0'],
+        // Using the built-in Browser utility for better compatibility
+        browser: Browsers.ubuntu('Chrome'),
+        syncFullHistory: false,
         connectTimeoutMs: 60000,
-        defaultQueryTimeoutMs: 0,
-        keepAliveIntervalMs: 10000,
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -32,23 +29,22 @@ async function startBot() {
         const { connection, lastDisconnect, qr } = update;
         
         if (qr) {
-            console.log(">> QR RECEIVED! SCAN NOW:");
+            console.log(">> [!] NEW QR CODE GENERATED:");
             qrcode.generate(qr, { small: true });
         }
         
         if (connection === 'open') {
-            console.log('SUCCESS: Bot is fully connected!');
+            console.log('>> [SUCCESS] Connected to WhatsApp!');
         }
 
         if (connection === 'close') {
             const statusCode = lastDisconnect.error?.output?.statusCode;
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-            
-            console.log(`Connection closed (Reason: ${statusCode}). Reconnecting: ${shouldReconnect}`);
-            
-            if (shouldReconnect) {
-                // Add a 5-second delay before reconnecting to prevent loops
-                setTimeout(() => startBot(), 5000);
+            // 405 error handling
+            if (statusCode === 405) {
+                console.log(">> [ERROR] 405 Detected. Retrying with delay...");
+                setTimeout(() => startBot(), 10000);
+            } else if (statusCode !== DisconnectReason.loggedOut) {
+                startBot();
             }
         }
     });
@@ -58,17 +54,15 @@ async function startBot() {
         const msg = messages[0];
         if (!msg.message || msg.key.fromMe) return;
 
-        const senderName = msg.pushName || "Contact";
         const body = msg.message.conversation || msg.message.extendedTextMessage?.text || "Media Content";
+        const sender = msg.pushName || "Contact";
 
-        // Forwarding logic
-        const text = `*From:* ${senderName}\n\n${body}`;
         axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
             chat_id: TELEGRAM_CHAT_ID,
-            text: text,
+            text: `*From:* ${sender}\n\n${body}`,
             parse_mode: "Markdown"
-        }).catch(err => console.log("TG Error"));
+        }).catch(e => {});
     });
 }
 
-startBot().catch(err => console.log("Critical Error: " + err));
+startBot();
